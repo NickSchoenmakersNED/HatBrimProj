@@ -29,6 +29,7 @@
 /* WHY: gives main.c access to the BH1750 driver (bh1750.h in Core/Inc). */
 #include "bh1750.h"
 #include <stdio.h>
+#include <stdbool.h>
 /* --------------------------------------------- */
 
 /* USER CODE END Includes */
@@ -63,6 +64,7 @@ volatile uint32_t ctrl_pulse = 0;
 //volatile uint32_t sensor1_status = 0;
 //volatile uint32_t sensor2_status = 0;
 // this way i should be able to call right or left instead of just 0 and 1
+// for moving avarage
 enum LDRIndex {
 	LDR_LEFT,   // 0
 	LDR_RIGHT,  // 1
@@ -74,7 +76,19 @@ void read_sensors(void) {
 	uint32_t left = LDRValues[LDR_LEFT];
 	uint32_t right = LDRValues[LDR_RIGHT];
 }
-/* --------------------------------------------- */
+
+// so i can read them out in the live expressions
+volatile int32_t avgLeft = 0;
+volatile int32_t avgRight = 0;
+
+const int32_t DIFF_ON  = 300;  // Minimum lead required to turn an LED ON
+const int32_t DIFF_OFF = 150;
+
+volatile bool turnLeft  = false;
+volatile bool turnRight = false;
+
+// once more for live expression
+volatile int32_t difference = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -139,18 +153,16 @@ int main(void) {
 		//return the average
 		return *ptrSum / len;
 	}
-	int arrayLeft[] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+	int arrayLeft[10];
 	int arrNumbersLeft[5] = { 0 };
 	int posLeft = 0;
-	int avgLeft = 0;
 	long sumLeft = 0;
 	int lenLeft = sizeof(arrNumbersLeft) / sizeof(int);
 	int countLeft = sizeof(arrNumbersLeft) / sizeof(int);
 
-	int arrayRight[] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+	int arrayRight[10];
 	int arrNumbersRight[10] = { 0 };
 	int posRight = 0;
-	int avgRight = 0;
 	long sumRight = 0;
 	int lenRight = sizeof(arrNumbersRight) / sizeof(int);
 	int countRight = sizeof(arrNumbersRight) / sizeof(int);
@@ -188,35 +200,62 @@ int main(void) {
 		// TOREAD:DMA (Direct Memory Access)
 
 		HAL_ADC_Start(&hadc1);
+
 		for (int i = 0; i <= 1; i++)
 		{
 			if (HAL_ADC_PollForConversion(&hadc1, 100) == HAL_OK) {
 				LDRValues[i] = HAL_ADC_GetValue(&hadc1);
 			}
+		}
 
-		}
 		HAL_ADC_Stop(&hadc1);
-		for (int i = 0; i < countLeft; i++) {
-			avgLeft = movingAvg(arrNumbersLeft, &sumLeft, posLeft, lenLeft, LDRValues[LDR_LEFT]);
-			posLeft++;
-			if (posLeft >= lenLeft) {
-				posLeft = 0;
-			}
+
+		avgLeft = movingAvg(arrNumbersLeft, &sumLeft, posLeft, lenLeft, (int)LDRValues[LDR_LEFT]);
+		posLeft++;
+		if (posLeft >= lenLeft) {
+			posLeft = 0;
 		}
-		for (int i = 0; i < countRight; i++) {
-			avgRight = movingAvg(arrNumbersRight, &sumRight, posRight, lenRight, LDRValues[LDR_RIGHT]);
-			posRight++;
-			if (posRight >= lenRight) {
-				posRight = 0;
-			}
+
+		avgRight = movingAvg(arrNumbersRight, &sumRight, posRight, lenRight, (int)LDRValues[LDR_RIGHT]);
+		posRight++;
+		if (posRight >= lenRight) {
+			posRight = 0;
 		}
-		if(avgLeft < avgRight)
-		{
-			__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, 1080);
+
+		difference = avgLeft - avgRight;
+
+//		volatile bool turnLeft  = false;
+//		volatile bool turnRight = false;
+		if (turnLeft == false) {
+		    if (difference >= DIFF_ON) {
+		    	turnLeft = true;
+				__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, 1280);
+		    } else {
+		    	turnLeft = false;
+		    }
+		}else {
+		    if (difference <= DIFF_OFF) {
+		    	turnLeft = false;
+				__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, 1480);
+		    } else {
+		    	turnLeft = true;
+		    }
 		}
-		else if(avgLeft > avgRight)
-		{
-			__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, 2080);
+
+		if (turnRight == false) {
+		    if (difference <= -DIFF_ON) {
+		    	turnRight = true;
+				__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, 1720);
+		    } else {
+		    	turnRight = false;
+		    }
+		} else {
+		    if (difference >= -DIFF_OFF) {
+		    	turnRight = false;
+				__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, 1480);
+		    } else {
+		    	turnRight = true;
+		    }
 		}
 //    fb_period  = __HAL_TIM_GET_COMPARE(&htim2, TIM_CHANNEL_2);
 //    fb_high    = __HAL_TIM_GET_COMPARE(&htim2, TIM_CHANNEL_1);

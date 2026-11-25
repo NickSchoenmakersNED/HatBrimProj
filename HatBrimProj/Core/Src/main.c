@@ -26,12 +26,11 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 /* --------------------------------------------- */
-/* WHY: gives main.c access to the BH1750 driver (bh1750.h in Core/Inc). */
-#include "bh1750.h"
-#include <stdio.h>
-#include <stdbool.h>
+/* WHY: gives main.c the two bridge functions (app_init / app_loop) that are
+   implemented in C++ in app.cpp. The old includes (bh1750.h, stdio.h,
+   stdbool.h) moved to app.cpp together with the code that uses them. */
+#include "app.h"
 /* --------------------------------------------- */
-
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -52,43 +51,7 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-volatile uint32_t fb_period = 0;
-volatile uint32_t fb_high = 0;
-volatile uint32_t ctrl_pulse = 0;
-/* --------------------------------------------- */
-/* WHY: One struct per physical sensor so each keeps its own I2C address. */
-//BH1750_t lightSensor1;   /* ADDR -> GND, address 0x23 */
-//BH1750_t lightSensor2;   /* ADDR -> 3V3, address 0x5C */
-//volatile float    lux1 = 0.0f;
-//volatile float    lux2 = 0.0f;
-//volatile uint32_t sensor1_status = 0;
-//volatile uint32_t sensor2_status = 0;
-// this way i should be able to call right or left instead of just 0 and 1
-// for moving avarage
-enum LDRIndex {
-	LDR_LEFT,   // 0
-	LDR_RIGHT,  // 1
-};
 
-volatile uint32_t LDRValues[2];
-
-void read_sensors(void) {
-	uint32_t left = LDRValues[LDR_LEFT];
-	uint32_t right = LDRValues[LDR_RIGHT];
-}
-
-// so i can read them out in the live expressions
-volatile int32_t avgLeft = 0;
-volatile int32_t avgRight = 0;
-
-const int32_t DIFF_ON  = 300;  // Minimum lead required to turn an LED ON
-const int32_t DIFF_OFF = 150;
-
-volatile bool turnLeft  = false;
-volatile bool turnRight = false;
-
-// once more for live expression
-volatile int32_t difference = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -135,43 +98,12 @@ int main(void) {
 	MX_I2C1_Init();
 	MX_ADC1_Init();
 	/* USER CODE BEGIN 2 */
-	HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
-	HAL_TIM_IC_Start(&htim2, TIM_CHANNEL_1);
-	HAL_TIM_IC_Start_IT(&htim2, TIM_CHANNEL_2);
-	// __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, 1680); move motor. delete later. its only here so i dont forget the syntax
-	if (HAL_ADCEx_Calibration_Start(&hadc1, ADC_SINGLE_ENDED) != HAL_OK) {
-		Error_Handler();
-	}
-	// move this somewhere better later
-	// source: https://gist.github.com/bmccormack/d12f4bf0c96423d03f82
-	int movingAvg(int *ptrArrNumbers, long *ptrSum, int pos, int len, int nextNum)
-	{
-		//Subtract the oldest number from the prev sum, add the new number
-		*ptrSum = *ptrSum - ptrArrNumbers[pos] + nextNum;
-		//Assign the nextNum to the position in the array
-		ptrArrNumbers[pos] = nextNum;
-		//return the average
-		return *ptrSum / len;
-	}
-	int arrayLeft[10];
-	int arrNumbersLeft[5] = { 0 };
-	int posLeft = 0;
-	long sumLeft = 0;
-	int lenLeft = sizeof(arrNumbersLeft) / sizeof(int);
-	int countLeft = sizeof(arrNumbersLeft) / sizeof(int);
-
-	int arrayRight[10];
-	int arrNumbersRight[10] = { 0 };
-	int posRight = 0;
-	long sumRight = 0;
-	int lenRight = sizeof(arrNumbersRight) / sizeof(int);
-	int countRight = sizeof(arrNumbersRight) / sizeof(int);
-
-//  sensor1_status = BH1750_Init(&lightSensor1, &hi2c1, BH1750_ADDR_LOW);
-//  sensor2_status = BH1750_Init(&lightSensor2, &hi2c1, BH1750_ADDR_HIGH);
-
-	/* first measurement needs up to 180 ms (datasheet max) before it is valid. */
-	HAL_Delay(180);
+	/* --------------------------------------------- */
+	/* WHY: timer/ADC startup, calibration and the 180 ms delay used to be
+	   written here. They now live in app_init() in app.cpp, so main.c only
+	   needs this one call. */
+	app_init();
+	/* --------------------------------------------- */
 	/* USER CODE END 2 */
 
 	/* Initialize leds */
@@ -194,88 +126,14 @@ int main(void) {
 		/* USER CODE END WHILE */
 
 		/* USER CODE BEGIN 3 */
-
-		printf("going to enter\n");
-
-		// TOREAD:DMA (Direct Memory Access)
-
-		HAL_ADC_Start(&hadc1);
-
-		for (int i = 0; i <= 1; i++)
-		{
-			if (HAL_ADC_PollForConversion(&hadc1, 100) == HAL_OK) {
-				LDRValues[i] = HAL_ADC_GetValue(&hadc1);
-			}
-		}
-
-		HAL_ADC_Stop(&hadc1);
-
-		avgLeft = movingAvg(arrNumbersLeft, &sumLeft, posLeft, lenLeft, (int)LDRValues[LDR_LEFT]);
-		posLeft++;
-		if (posLeft >= lenLeft) {
-			posLeft = 0;
-		}
-
-		avgRight = movingAvg(arrNumbersRight, &sumRight, posRight, lenRight, (int)LDRValues[LDR_RIGHT]);
-		posRight++;
-		if (posRight >= lenRight) {
-			posRight = 0;
-		}
-
-		difference = avgLeft - avgRight;
-
-//		volatile bool turnLeft  = false;
-//		volatile bool turnRight = false;
-		if (turnLeft == false) {
-		    if (difference >= DIFF_ON) {
-		    	turnLeft = true;
-				__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, 1280);
-		    } else {
-		    	turnLeft = false;
-		    }
-		}else {
-		    if (difference <= DIFF_OFF) {
-		    	turnLeft = false;
-				__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, 1480);
-		    } else {
-		    	turnLeft = true;
-		    }
-		}
-
-		if (turnRight == false) {
-		    if (difference <= -DIFF_ON) {
-		    	turnRight = true;
-				__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, 1720);
-		    } else {
-		    	turnRight = false;
-		    }
-		} else {
-		    if (difference >= -DIFF_OFF) {
-		    	turnRight = false;
-				__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, 1480);
-		    } else {
-		    	turnRight = true;
-		    }
-		}
-//    fb_period  = __HAL_TIM_GET_COMPARE(&htim2, TIM_CHANNEL_2);
-//    fb_high    = __HAL_TIM_GET_COMPARE(&htim2, TIM_CHANNEL_1);
-//    ctrl_pulse = __HAL_TIM_GET_COMPARE(&htim1, TIM_CHANNEL_1);
-//    {
-//      float tmp1 = 0.0f;
-//      float tmp2 = 0.0f;
-//      sensor1_status = BH1750_ReadLux(&lightSensor1, &tmp1);
-//      sensor2_status = BH1750_ReadLux(&lightSensor2, &tmp2);
-//      if (sensor1_status == HAL_OK)
-//      {
-//    	  	  lux1 = tmp1;
-//      }
-//      if (sensor2_status == HAL_OK)
-//      {
-//    	  	  lux2 = tmp2;
-//      }
-//    }
-
-		HAL_Delay(100);
+		// initially all my logic was in this main.c file. But i need to use C++ so i needed c++ files. now HAL and MX may overwrite this file if i change it to
+		// c++. so i now call the main app as a loop. this was done using claude. see chat below.
+		// https://claude.ai/share/4dc9b8e9-1304-4f1a-9f0f-5956f63ff31f
+		/* --------------------------------------------- */
+		/* WHY: the whole loop body (ADC read, moving average, servo logic,
+		   100 ms delay) now lives in app_loop() in app.cpp. */
+		app_loop();
+		/* --------------------------------------------- */
 	}
 	/* USER CODE END 3 */
 }
